@@ -47,8 +47,10 @@ app.add_middleware(
 def _connect_db():
     """Create a DB connection that enforces SSL unless disabled explicitly."""
     conn_kwargs = {}
+    sslmode = os.environ.get("DB_SSLMODE", "require").strip()  # Strip whitespace/newlines
     if "sslmode=" not in DATABASE_URL.lower():
-        conn_kwargs["sslmode"] = os.environ.get("DB_SSLMODE", "require")
+        conn_kwargs["sslmode"] = sslmode
+    logger.info(f"Connecting to DB with sslmode: {sslmode}")
     return psycopg2.connect(DATABASE_URL, **conn_kwargs)
 
 
