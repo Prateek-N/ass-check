@@ -1,12 +1,18 @@
 import os
 from pathlib import Path
 from typing import Tuple, Optional
+import traceback
 
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Add logging for debugging
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 try:
     import psycopg2
@@ -177,44 +183,56 @@ def pending(req: FilterRequest):
 
 @app.post("/nikeeta-lookup")
 def nikeeta_lookup(req: NikeetaRequest):
-    _, df2 = load_data()
+    logger.info(f"Nikeeta lookup request: {req}")
+    try:
+        _, df2 = load_data()
+    except Exception as e:
+        logger.error(f"Failed to load data: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Database connection failed")
 
-    # Filter: status is empty or null (exclude defined values)
-    # Note: df2["task_status"] might be object type.
-    mask = (df2["task_status"].isna()) | (df2["task_status"] == "")
-    filtered_df = df2[mask]
+    try:
+        # Filter: status is empty or null (exclude defined values)
+        # Note: df2["task_status"] might be object type.
+        mask = (df2["task_status"].isna()) | (df2["task_status"] == "")
+        filtered_df = df2[mask]
 
-    # Date Filtering (using email_datetime_est)
-    date_col = "email_datetime_est"
-    if date_col in filtered_df.columns:
-        # Ensure column is datetime
-        filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], errors="coerce", utc=True)
-        
-        if req.start_date:
-            start = pd.to_datetime(req.start_date, utc=True)
-            filtered_df = filtered_df[filtered_df[date_col] >= start]
-        
-        if req.end_date:
-            end = pd.to_datetime(req.end_date, utc=True)
-            # Adjust end date to include the full day (if it's just a date string)
-            # or rely on exact comparison if it includes time. 
-            # Assuming YYYY-MM-DD from frontend, adding 1 day approx or just <= if time is 00:00
-            # A safe bet for "inclusive" end date is to make it end of day if no time is present.
-            # But let's assume standard comparison for now.
-            filtered_df = filtered_df[filtered_df[date_col] <= end + pd.Timedelta(days=1)]
+        # Date Filtering (using email_datetime_est)
+        date_col = "email_datetime_est"
+        if date_col in filtered_df.columns:
+            # Ensure column is datetime
+            filtered_df[date_col] = pd.to_datetime(filtered_df[date_col], errors="coerce", utc=True)
+            
+            if req.start_date:
+                start = pd.to_datetime(req.start_date, utc=True)
+                filtered_df = filtered_df[filtered_df[date_col] >= start]
+            
+            if req.end_date:
+                end = pd.to_datetime(req.end_date, utc=True)
+                # Adjust end date to include the full day (if it's just a date string)
+                # or rely on exact comparison if it includes time. 
+                # Assuming YYYY-MM-DD from frontend, adding 1 day approx or just <= if time is 00:00
+                # A safe bet for "inclusive" end date is to make it end of day if no time is present.
+                # But let's assume standard comparison for now.
+                filtered_df = filtered_df[filtered_df[date_col] <= end + pd.Timedelta(days=1)]
 
-    # Pagination
-    total_records = len(filtered_df)
-    start_idx = (req.page - 1) * req.page_size
-    end_idx = start_idx + req.page_size
+        # Pagination
+        total_records = len(filtered_df)
+        start_idx = (req.page - 1) * req.page_size
+        end_idx = start_idx + req.page_size
 
-    paginated_df = filtered_df.iloc[start_idx:end_idx]
+        paginated_df = filtered_df.iloc[start_idx:end_idx]
 
-    data = paginated_df.astype(object).where(pd.notnull(paginated_df), None).to_dict(orient="records")
+        data = paginated_df.astype(object).where(pd.notnull(paginated_df), None).to_dict(orient="records")
 
-    return {
-        "data": data,
-        "total": total_records,
-        "page": req.page,
-        "page_size": req.page_size
-    }
+        logger.info(f"Returning {len(data)} records out of {total_records} total")
+        return {
+            "data": data,
+            "total": total_records,
+            "page": req.page,
+            "page_size": req.page_size
+        }
+    except Exception as e:
+        logger.error(f"Error processing nikeeta lookup: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal server error")
