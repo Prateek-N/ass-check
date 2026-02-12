@@ -23,7 +23,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set. Add it in your Render service settings.")
 
-app = FastAPI()
+# Adjust root_path for Vercel deployment where requests might come via /api proxy
+root_path = "/api" if os.environ.get("VERCEL") else ""
+app = FastAPI(root_path=root_path)
 
 allow_origins = ["*"]
 
